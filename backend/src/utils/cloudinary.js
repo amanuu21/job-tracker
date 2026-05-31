@@ -1,47 +1,72 @@
-const cloudinary = require('cloudinary').v2;
 const multer = require('multer');
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+// Lazy-initialize cloudinary so missing env vars don't crash startup
+let _cloudinary = null;
+let _uploadAvatar = null;
+let _uploadDocument = null;
 
-const avatarStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'job-tracker/avatars',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [{ width: 300, height: 300, crop: 'fill', gravity: 'face' }],
-  },
-});
+const getCloudinary = () => {
+  if (!_cloudinary) {
+    const cloudinary = require('cloudinary').v2;
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+    _cloudinary = cloudinary;
+  }
+  return _cloudinary;
+};
 
-const documentStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'job-tracker/documents',
-    allowed_formats: ['pdf', 'doc', 'docx'],
-    resource_type: 'raw',
-  },
-});
+const getUploadAvatar = () => {
+  if (!_uploadAvatar) {
+    const { CloudinaryStorage } = require('multer-storage-cloudinary');
+    const storage = new CloudinaryStorage({
+      cloudinary: getCloudinary(),
+      params: {
+        folder: 'job-tracker/avatars',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+        transformation: [{ width: 300, height: 300, crop: 'fill', gravity: 'face' }],
+      },
+    });
+    _uploadAvatar = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 } });
+  }
+  return _uploadAvatar;
+};
 
-const uploadAvatar = multer({
-  storage: avatarStorage,
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
-});
+const getUploadDocument = () => {
+  if (!_uploadDocument) {
+    const { CloudinaryStorage } = require('multer-storage-cloudinary');
+    const storage = new CloudinaryStorage({
+      cloudinary: getCloudinary(),
+      params: {
+        folder: 'job-tracker/documents',
+        allowed_formats: ['pdf', 'doc', 'docx'],
+        resource_type: 'raw',
+      },
+    });
+    _uploadDocument = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+  }
+  return _uploadDocument;
+};
 
-const uploadDocument = multer({
-  storage: documentStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-});
+// Proxy objects so existing code (uploadAvatar.single()) still works
+const uploadAvatar = {
+  single: (field) => (req, res, next) => getUploadAvatar().single(field)(req, res, next),
+  array: (field, max) => (req, res, next) => getUploadAvatar().array(field, max)(req, res, next),
+};
+
+const uploadDocument = {
+  single: (field) => (req, res, next) => getUploadDocument().single(field)(req, res, next),
+  array: (field, max) => (req, res, next) => getUploadDocument().array(field, max)(req, res, next),
+};
 
 const deleteFile = async (publicId, resourceType = 'image') => {
   try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+    await getCloudinary().uploader.destroy(publicId, { resource_type: resourceType });
   } catch (error) {
     console.error('Cloudinary delete error:', error);
   }
 };
 
-module.exports = { cloudinary, uploadAvatar, uploadDocument, deleteFile };
+module.exports = { uploadAvatar, uploadDocument, deleteFile };

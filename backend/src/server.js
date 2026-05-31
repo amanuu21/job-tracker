@@ -100,14 +100,26 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV });
 });
 
-// API Routes
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/jobs', require('./routes/jobs'));
-app.use('/api/applications', require('./routes/applications'));
-app.use('/api/evaluations', require('./routes/evaluations'));
-app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/reports', require('./routes/reports'));
+// API Routes - wrapped so a single bad require doesn't kill all routes
+const loadRoute = (path) => {
+  try {
+    return require(path);
+  } catch (err) {
+    console.error(`❌ Failed to load route ${path}:`, err.message);
+    // Return a router that reports the error instead of silently 404ing
+    const errRouter = require('express').Router();
+    errRouter.all('*', (req, res) => res.status(500).json({ success: false, message: `Route module failed to load: ${err.message}` }));
+    return errRouter;
+  }
+};
+
+app.use('/api/auth', loadRoute('./routes/auth'));
+app.use('/api/users', loadRoute('./routes/users'));
+app.use('/api/jobs', loadRoute('./routes/jobs'));
+app.use('/api/applications', loadRoute('./routes/applications'));
+app.use('/api/evaluations', loadRoute('./routes/evaluations'));
+app.use('/api/notifications', loadRoute('./routes/notifications'));
+app.use('/api/reports', loadRoute('./routes/reports'));
 
 // Error handling
 app.use(notFound);
